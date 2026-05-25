@@ -1,13 +1,17 @@
-import {io} from "socket.io-client";
+import SockJS from "sockjs-client";
+import Stomp from "stompjs";
 
-const liveURL = import.meta.env.PROD
-      ? import.meta.env.VITE_SERVER_URL   // production backend URL
-      : 'http://localhost:3000'        
+let stompClient = null;
 
-    export const socket = io(liveURL, {
-        autoConnect: false,
-        auth: {
-            token: localStorage.getItem('token')
-        }
-    });
+export const connectSocket = (onConnected) => {
+  const socket = new SockJS("http://localhost:8080/ws");
 
+  stompClient = Stomp.over(socket);
+
+  stompClient.connect({}, () => {
+    console.log("WebSocket Connected");
+    if (onConnected) onConnected();
+  });
+};
+
+export const getStompClient = () => stompClient;

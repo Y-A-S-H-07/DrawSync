@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { socket } from "../../Socket/ws";
-import { toast } from "react-toastify";
+import { connectSocket, getStompClient } from "../../Socket/ws";import { toast } from "react-toastify";
 import Whiteboard from "../WhiteBoardLibrary/WhiteBoard";
 import api from "../../API/axios";
 
@@ -12,113 +11,61 @@ function RoomPage() {
   const [micOn, setMicOn] = useState(true);
   const [members, setMembers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
-  const boardRef = useRef(null);
+  const [initialBoard, setInitialBoard] = useState(null);
   const hasJoined = useRef(false);
   const [hostName, setHostName] = useState("");
   const [summary, setSummary] = useState('');
   const [permittedMember, setPermittedMember] = useState([]);
+  const client = getStompClient();
 
   useEffect(() => {
+  if (!roomId) {
+    navigate("/");
+    return;
+  }
 
-    if (!roomId) {
-      navigate("/");
-      return;
-    }
+  connectSocket(() => {
+    const client = getStompClient();
 
-    // Connect socket immediately if not connected
-    if (!socket.connected) {
-      socket.connect();
-      // navigate('/');
-    }
+    // 🔹 JOIN ROOM
+    client.send("/app/join", {}, JSON.stringify({ roomId }));
 
-    // Wait for connection before joining
-    const attemptJoin = () => {
-      if (socket.connected && !hasJoined.current) {
-        socket.emit("joinRoom", { roomId });
-        hasJoined.current = true;
-      }
-    };
+    // 🔹 SUBSCRIBE ROOM
+    client.subscribe("/topic/room/" + roomId, (msg) => {
+      const data = JSON.parse(msg.body);
 
-    if (socket.connected) {
-      attemptJoin();
-    } else {
-      socket.on("connect", attemptJoin);
-    }
+      console.log("Received:", data);
 
-    //room joined function
-    const handleRoomJoined = ({ roomName, users, boardData, currentUser: user, host }) => {
-      console.log("Room joined:", { roomName, users, boardData });
-      if (boardData) {
-        boardRef.current = boardData;
-      }
-      if (user) {
-        setCurrentUser(user);
-      }
-      if (host) {
-        setHostName(host);
+      // handle based on type
+      if (data.type === "JOINED") {
+        setMembers(data.users || []);
+        setCurrentUser(data.currentUser);
+        setHostName(data.host);
+        setInitialBoard(data.boardData);
       }
 
-      toast.success(`Joined room: ${roomName}`);
-      setMembers(users || []);
-    };
+      if (data.type === "USER_JOINED") {
+        setMembers((prev) => [...prev, data.user]);
+      }
 
-    //handle user joined
-    const handleUserJoined = ({ userId, name }) => {
-      console.log("User joined:", { userId, name });
-      setMembers((prev) => {
-        if (prev.some((u) => u.userId === userId)) return prev;
-        return [...prev, { userId, name }];
-      });
-      sessionStorage.setItem("inRoom", "true");
-      toast.info(`${name} joined the room`);
-    };
+      if (data.type === "USER_LEFT") {
+        setMembers((prev) =>
+          prev.filter((u) => u.userId !== data.user.userId)
+        );
+      }
 
-    //handle user joined
-    const handleUserLeft = ({ userId, name }) => {
-      console.log("User left:", { userId, name });
-      setMembers((prev) => prev.filter((m) => m.userId !== userId));
-      toast.info(`${name} left the room`);
-    };
-
-    //handle room closed
-    const handleRoomClosed = () => {
-      toast.error("Host left. Room closed.");
-      socket.disconnect();
-      navigate("/");
-    };
-
-    // permission update
-    socket.on("permission:update", ({ permitted }) => {
-      setPermittedMember(permitted);
-      toast.info("Permissions updated");
+      if (data.type === "DRAW") {
+        // handled in whiteboard
+      }
     });
+  });
 
-    const handleError = ({ msg }) => {
-      toast.error(msg || "An error occurred");
-      navigate("/");
-    };
-
-    socket.on("roomJoined", handleRoomJoined);
-    socket.on("userJoined", handleUserJoined);
-    socket.on("user-left", handleUserLeft);
-    socket.on("room-closed", handleRoomClosed);
-    socket.on("error", handleError);
-
-    return () => {
-      socket.off("connect", attemptJoin);
-      socket.off("roomJoined", handleRoomJoined);
-      socket.off("userJoined", handleUserJoined);
-      socket.off("user-left", handleUserLeft);
-      socket.off("room-closed", handleRoomClosed);
-      socket.off("permission:update");
-      socket.off("error", handleError);
-    };
-  }, [roomId, navigate]);
+}, [roomId]);
 
 
 
   const handleLeave = () => {
-    socket.disconnect();
+    getStompClient().disconnect();
     hasJoined.current = false;
     navigate("/");
   };
@@ -133,10 +80,10 @@ function RoomPage() {
     setPermittedMember(updated);
 
     // Broadcast to room
-    socket.emit("permission:update", {
+    getStompClient().send("/app/permission", {}, JSON.stringify({
       roomId,
       permitted: updated
-    });
+    }));
   }
 
 
@@ -183,7 +130,7 @@ function RoomPage() {
         </div>
         {
           currentUser &&
-          <Whiteboard roomId={roomId} initialBoard={boardRef.current} permittedMember={permittedMember} currentUser={currentUser} hostName={hostName} />
+          <Whiteboard roomId={roomId} initialBoard={initialBoard} permittedMember={permittedMember} currentUser={currentUser} hostName={hostName} />
         }
       </div>
 
@@ -282,29 +229,13 @@ function ChatBox({ roomId, currentUser }) {
   const hasLoadedHistory = useRef(false);
 
   useEffect(() => {
-    // Load chat history when component mounts
-    const loadChatHistory = ({ messages: chatHistory }) => {
-      if (!hasLoadedHistory.current) {
-        setMessages(chatHistory || []);
-        hasLoadedHistory.current = true;
-      }
-    };
+    const client = getStompClient();
 
-    // Listen for new chat messages from server
-    const handleChatMessage = (message) => {
+    client.subscribe("/topic/chat/" + roomId, (msg) => {
+      const message = JSON.parse(msg.body);
       setMessages((prev) => [...prev, message]);
-    };
+    });
 
-    socket.on("chat:history", loadChatHistory);
-    socket.on("chat:message", handleChatMessage);
-
-    // Request chat history
-    socket.emit("chat:requestHistory", { roomId });
-
-    return () => {
-      socket.off("chat:history", loadChatHistory);
-      socket.off("chat:message", handleChatMessage);
-    };
   }, [roomId]);
 
   const sendMessage = () => {
@@ -316,8 +247,10 @@ function ChatBox({ roomId, currentUser }) {
       userId: currentUser.userId,
     };
 
-    // Emit to server (server will broadcast to all including sender)
-    socket.emit("chat:send", { roomId, message });
+    getStompClient().send("/app/chat", {}, JSON.stringify({
+      roomId,
+      message
+    }));
 
     setInput("");
   };

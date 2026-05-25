@@ -163,7 +163,7 @@ export default function LandingPage() {
             ) : (
               <>
                 <span className="user-badge">
-                  {userInfo?.name || 'User'}
+                  {userInfo?.fullName || 'User'}
                 </span>
                 {/* ✅ History Button */}
       <Link

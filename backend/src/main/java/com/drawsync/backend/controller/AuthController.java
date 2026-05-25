@@ -21,18 +21,27 @@ public class AuthController {
     private JwtService jwtService;
 
     @PostMapping("/signup")
-    public User signup(@RequestBody User user) {
-        return userService.register(user);
+    public Map<String, Object> signup(@RequestBody User user) {
+        User savedUser = userService.register(user);
+
+        String token = jwtService.generateToken(savedUser.getEmail());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("token", token);
+        response.put("user", savedUser);
+
+        return response;
     }
 
     @PostMapping("/login")
-    public Map<String, String> login(@RequestBody User user) {
+    public Map<String, Object> login(@RequestBody User user) {
         User existingUser = userService.login(user.getEmail(), user.getPassword());
 
         String token = jwtService.generateToken(existingUser.getEmail());
 
-        Map<String, String> response = new HashMap<>();
+        Map<String, Object> response = new HashMap<>();
         response.put("token", token);
+        response.put("user", existingUser); 
 
         return response;
     }

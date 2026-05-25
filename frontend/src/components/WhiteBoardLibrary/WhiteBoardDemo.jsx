@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { socket } from "../../Socket/ws";
 import {
     MousePointer2,
     Pencil,

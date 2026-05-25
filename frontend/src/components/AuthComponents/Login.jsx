@@ -56,7 +56,7 @@ export default function Login() {
 
           //storing data in local storage
           localStorage.setItem('token', data.token);
-          localStorage.setItem('userDetails', JSON.stringify(data.data));
+          localStorage.setItem('userDetails', JSON.stringify(data.user));
 
           setRunningLoader(false);
           navigate("/");

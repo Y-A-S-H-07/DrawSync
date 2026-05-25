@@ -73,7 +73,7 @@ export default function Signup() {
 
         //storing token and detail in localStorage
         localStorage.setItem('token', data.token);
-        localStorage.setItem('userDetails', JSON.stringify(data.data));
+        localStorage.setItem('userDetails', JSON.stringify(data.user));
 
         setRunningLoader(false);
 

@@ -66,7 +66,6 @@ const styles = {
 };
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { socket } from "../../Socket/ws";
 import { toast } from "react-toastify";
 
 function RoomOptions() {
