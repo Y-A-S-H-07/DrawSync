@@ -248,16 +248,24 @@ function ChatBox({ roomId, currentUser }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const messagesEndRef = useRef(null);
-  const hasLoadedHistory = useRef(false);
 
   useEffect(() => {
     const client = getStompClient();
+    if (!client) return;
 
-    client.subscribe("/topic/chat/" + roomId, (msg) => {
+    console.log("Setting up chat subscription for room:", roomId);
+    
+    const subscription = client.subscribe("/topic/chat/" + roomId, (msg) => {
       const message = JSON.parse(msg.body);
       setMessages((prev) => [...prev, message]);
     });
 
+    return () => {
+      if (subscription) {
+        console.log("Cleaning up stale chat listener...");
+        subscription.unsubscribe();
+      }
+    };
   }, [roomId]);
 
   const sendMessage = () => {
@@ -267,6 +275,7 @@ function ChatBox({ roomId, currentUser }) {
       text: input,
       userName: currentUser.name,
       userId: currentUser.userId,
+      createdAt: new Date().toISOString()
     };
 
     getStompClient().publish({
@@ -297,10 +306,10 @@ function ChatBox({ roomId, currentUser }) {
               <div style={chatStyles.userName}>{m.userName}</div>
               <div style={chatStyles.messageText}>{m.text}</div>
               <div style={chatStyles.time}>
-                {new Date(m.createdAt).toLocaleTimeString([], {
+                {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], {
                   hour: "2-digit",
                   minute: "2-digit",
-                })}
+                }) : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </div>
             </div>
           ))
@@ -323,7 +332,6 @@ function ChatBox({ roomId, currentUser }) {
     </div>
   );
 }
-
 function SummaryGeneration({ roomId, setSummary, summary }) {
 
   const [loading, setLoading] = useState(false);
@@ -343,7 +351,6 @@ function SummaryGeneration({ roomId, setSummary, summary }) {
   return (
     <div style={{ padding: "20px", textAlign: "center", opacity: 0.9 }}>
 
-      {/* ⭐ INLINE STYLE TAG FOR PERFECT FORMATTING */}
       <style>{`
         .summary-output pre {
           white-space: pre-wrap;

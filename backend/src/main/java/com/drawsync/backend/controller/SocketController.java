@@ -95,4 +95,17 @@ public class SocketController {
                 (Object) payload
         );
     }
+
+    @MessageMapping("/chat")
+    public void handleChatMessage(java.util.Map<String, Object> payload) {
+        String roomId = (String) payload.get("roomId");
+        Object messageData = payload.get("message"); // Extracts text, userName, userId
+
+        System.out.println("Broad0casting message to room: " + roomId);
+
+        messagingTemplate.convertAndSend(
+                "/topic/chat/" + roomId,
+                messageData
+        );
+    }
 }

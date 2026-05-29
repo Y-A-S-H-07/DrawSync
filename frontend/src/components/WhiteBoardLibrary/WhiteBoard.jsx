@@ -315,6 +315,8 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
             isStateChanging.current = false;
             setCanUndo(undoStack.current.length > 1);
             setCanRedo(redoStack.current.length > 0);
+            
+            saveState(true);
         });
     };
 
@@ -329,6 +331,8 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
                 isStateChanging.current = false;
                 setCanUndo(undoStack.current.length > 1);
                 setCanRedo(redoStack.current.length > 0);
+                
+                saveState(true);
             });
         }
     };
