@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { connectSocket, getStompClient } from "../../Socket/stomp";
 import {
     MousePointer2,
     Pencil,

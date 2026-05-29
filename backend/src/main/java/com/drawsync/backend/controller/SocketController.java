@@ -1,12 +1,13 @@
 package com.drawsync.backend.controller;
 
-import com.drawsync.backend.model.DrawMessage;
 import com.drawsync.backend.model.Room;
 import com.drawsync.backend.repository.RoomRepository;
+import com.drawsync.backend.repository.UserRepository; // ✅ Added Import
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Controller
 public class SocketController {
@@ -17,27 +18,81 @@ public class SocketController {
     @Autowired
     private RoomRepository roomRepository;
 
-    @MessageMapping("/draw")
-    public void draw(DrawMessage message) {
+    @Autowired
+    private UserRepository userRepository; // ✅ Added Dependency Injector
+
+    @MessageMapping("/board")
+    public void handleBoardUpdate(java.util.Map<String, Object> payload) {
+        String roomId = (String) payload.get("roomId");
+        Object boardData = payload.get("boardData");
 
         messagingTemplate.convertAndSend(
-                "/topic/room/" + message.getRoomId(),
-                message
+                "/topic/board/" + roomId,
+                boardData
         );
 
-        Room room = roomRepository.findByRoomId(message.getRoomId())
+        Room room = roomRepository.findByRoomId(roomId)
                 .orElseThrow(() -> new RuntimeException("Room not found"));
 
-        String existingData = room.getBoardData();
-
-        String newPoint = message.getX() + "," + message.getY() + "," + message.getColor();
-
-        if (existingData == null || existingData.isEmpty()) {
-            room.setBoardData(newPoint);
-        } else {
-            room.setBoardData(existingData + "|" + newPoint);
+        try {
+            String jsonString = new ObjectMapper().writeValueAsString(boardData);
+            room.setBoardData(jsonString);
+            roomRepository.save(room);
+        } catch (Exception e) {
+            System.err.println("Error saving board data: " + e.getMessage());
         }
+    }
 
-        roomRepository.save(room);
+    @MessageMapping("/join")
+    public void joinRoom(java.util.Map<String, Object> payload, java.security.Principal principal) {
+        String roomId = (String) payload.get("roomId");
+
+        var roomOptional = roomRepository.findByRoomId(roomId);
+        if (roomOptional.isEmpty()) {
+            System.err.println("⚠️ Client tried to join non-existent room ID: " + roomId);
+
+            java.util.Map<String, Object> errorResponse = new java.util.HashMap<>();
+            errorResponse.put("type", "ERROR");
+            errorResponse.put("message", "Room does not exist");
+
+            messagingTemplate.convertAndSend(
+                    "/topic/room/" + roomId,
+                    (Object) errorResponse
+            );
+            return;
+        }
+        Room room = roomOptional.get();
+
+        String userEmail = principal != null ? principal.getName() : "Anonymous";
+
+        // ✅ FIXED: Look up your real name (e.g., "Yash Keshao Dabhekar") from the Database
+        String fullName = userRepository.findByEmail(userEmail)
+                .map(com.drawsync.backend.model.User::getFullName)
+                .orElse(userEmail.split("@")[0]);
+
+        java.util.Map<String, Object> currentUser = new java.util.HashMap<>();
+        currentUser.put("userId", userEmail);
+        currentUser.put("name", fullName); // ✅ Uses real name instead of just email split snippet
+
+        java.util.Map<String, Object> response = new java.util.HashMap<>();
+        response.put("type", "JOINED");
+        response.put("currentUser", currentUser);
+        response.put("users", java.util.List.of(currentUser));
+        response.put("host", room.getHostEmail());
+        response.put("boardData", room.getBoardData());
+
+        messagingTemplate.convertAndSend(
+                "/topic/room/" + roomId,
+                (Object)response
+        );
+    }
+
+    @MessageMapping("/permission")
+    public void handlePermissionUpdate(java.util.Map<String, Object> payload) {
+        String roomId = (String) payload.get("roomId");
+        messagingTemplate.convertAndSend(
+                "/topic/permission/" + roomId,
+                (Object) payload
+        );
     }
 }

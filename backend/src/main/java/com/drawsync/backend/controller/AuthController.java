@@ -41,7 +41,7 @@ public class AuthController {
 
         Map<String, Object> response = new HashMap<>();
         response.put("token", token);
-        response.put("user", existingUser); 
+        response.put("user", existingUser);
 
         return response;
     }

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { connectSocket, getStompClient } from "../../Socket/ws";import { toast } from "react-toastify";
 import Whiteboard from "../WhiteBoardLibrary/WhiteBoard";
 import api from "../../API/axios";
+import { connectSocket, getStompClient } from "../../Socket/stomp";
 
 function RoomPage() {
   const { roomId } = useParams();
@@ -16,51 +16,70 @@ function RoomPage() {
   const [hostName, setHostName] = useState("");
   const [summary, setSummary] = useState('');
   const [permittedMember, setPermittedMember] = useState([]);
-  const client = getStompClient();
 
   useEffect(() => {
-  if (!roomId) {
-    navigate("/");
-    return;
-  }
+    if (!roomId || hasJoined.current) return;
 
-  connectSocket(() => {
-    const client = getStompClient();
+    hasJoined.current = true;
 
-    // 🔹 JOIN ROOM
-    client.send("/app/join", {}, JSON.stringify({ roomId }));
+    connectSocket(() => {
+      const client = getStompClient();
 
-    // 🔹 SUBSCRIBE ROOM
-    client.subscribe("/topic/room/" + roomId, (msg) => {
-      const data = JSON.parse(msg.body);
+      const user = JSON.parse(localStorage.getItem("userDetails"));
 
-      console.log("Received:", data);
+      console.log("Joining room:", roomId);
 
-      // handle based on type
-      if (data.type === "JOINED") {
-        setMembers(data.users || []);
-        setCurrentUser(data.currentUser);
-        setHostName(data.host);
-        setInitialBoard(data.boardData);
-      }
+      
+      client.publish({
+        destination: "/app/join",
+        body: JSON.stringify({
+          roomId,
+          userId: user?.id,
+          userName: user?.fullName || user?.name
+        }),
+      });
+      
 
-      if (data.type === "USER_JOINED") {
-        setMembers((prev) => [...prev, data.user]);
-      }
+      client.subscribe("/topic/room/" + roomId, (msg) => {
 
-      if (data.type === "USER_LEFT") {
-        setMembers((prev) =>
-          prev.filter((u) => u.userId !== data.user.userId)
-        );
-      }
+        const data = JSON.parse(msg.body);
+        console.log("Received:", data);
 
-      if (data.type === "DRAW") {
-        // handled in whiteboard
-      }
+        if (data.type === "ERROR") {
+          alert("This room does not exist! Redirecting you back home...");
+          getStompClient().disconnect();
+          hasJoined.current = false;
+          navigate("/"); // Send them back to the main lobby page
+          return;
+        }
+
+        if (data.type === "JOINED") {
+          setMembers(data.users || []);
+          setCurrentUser(data.currentUser);
+          setHostName(data.host);
+          setInitialBoard(data.boardData);
+        }
+        
+
+        if (data.type === "USER_JOINED") {
+          setMembers((prev) => [...prev, data.user]);
+        }
+
+        if (data.type === "USER_LEFT") {
+          setMembers((prev) =>
+            prev.filter((u) => u.userId !== data.user.userId)
+          );
+        }
+      });
+
+      client.subscribe("/topic/permission/" + roomId, (msg) => {
+        const data = JSON.parse(msg.body);
+        console.log("Received Permission Update:", data);
+        setPermittedMember(data.permitted || []);
+      });
     });
-  });
 
-}, [roomId]);
+  }, [roomId]);
 
 
 
@@ -80,10 +99,13 @@ function RoomPage() {
     setPermittedMember(updated);
 
     // Broadcast to room
-    getStompClient().send("/app/permission", {}, JSON.stringify({
-      roomId,
-      permitted: updated
-    }));
+    getStompClient().publish({
+      destination: "/app/permission",
+      body: JSON.stringify({
+        roomId,
+        permitted: updated
+      }),
+    });
   }
 
 
@@ -194,10 +216,12 @@ function Members({ members, hostName, handlePermission, currentUser, permittedMe
       {members.map((m) => (
         <div key={m.userId} style={memberStyles.row}>
           <div style={memberStyles.userInfo}>
-            <div style={memberStyles.avatar} className={`${m.userId === currentUser.userId ? 'border-8 border-emerald-500' : ''}`}>
+            <div style={memberStyles.avatar} className={`${m.userId === currentUser?.userId ? 'border-2 border-emerald-500' : ''}`}>
               {m.name ? m.name.charAt(0).toUpperCase() : "?"}
             </div>
-            <span style={memberStyles.name} className={`${permittedMember.includes(m.userId) ? 'text-red-200' : ''}`}>{m.name || "Anonymous"}</span>
+            <span style={memberStyles.name}>
+              {m.name || "Anonymous"} {m.userId === currentUser?.userId ? " (You)" : ""}
+            </span>
           </div>
 
           <div style={memberStyles.actions}>
@@ -206,15 +230,13 @@ function Members({ members, hostName, handlePermission, currentUser, permittedMe
             </button>
 
             {
-              (currentUser.name === hostName && m.name !== hostName) &&
+              (currentUser?.userId === hostName && m.userId !== hostName) &&
               <button style={styles.drawBtn} title="Draw permission" onClick={() => { handlePermission(m.userId) }}>
                 {
                   permittedMember.includes(m.userId) ? '❌' : '✏️'
                 }
-
               </button>
             }
-
           </div>
         </div>
       ))}
@@ -247,10 +269,13 @@ function ChatBox({ roomId, currentUser }) {
       userId: currentUser.userId,
     };
 
-    getStompClient().send("/app/chat", {}, JSON.stringify({
-      roomId,
-      message
-    }));
+    getStompClient().publish({
+      destination: "/app/chat",
+      body: JSON.stringify({
+        roomId,
+        message
+      }),
+    });
 
     setInput("");
   };

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { connectSocket, getStompClient } from "../../Socket/stomp";
 import {
     MousePointer2,
     Pencil,
@@ -109,10 +110,6 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
         canvas.on("object:modified", handleObjectModified);
         canvas.on("object:removed", handleObjectRemoved);
 
-        canvas.on("object:moving", () => canvas.requestRenderAll());
-        canvas.on("object:scaling", () => canvas.requestRenderAll());
-        canvas.on("object:rotating", () => canvas.requestRenderAll());
-
         canvas.on("mouse:down", (opt) => handleMouseDown(opt, canvas));
         canvas.on("mouse:move", (opt) => handleMouseMove(opt, canvas));
         canvas.on("mouse:up", () => handleMouseUp(canvas));
@@ -142,20 +139,13 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
             canvas.off("object:added", handleObjectAdded);
             canvas.off("object:modified", handleObjectModified);
             canvas.off("object:removed", handleObjectRemoved);
-            canvas.off("object:moving");
-            canvas.off("object:scaling");
-            canvas.off("object:rotating");
             canvas.dispose();
         };
     }, []);
 
      // Load initial board data
     useEffect(() => {
-        console.log(!fabricCanvas);
-        console.log(!initialBoard);
-        console.log(hasLoadedInitialBoard.current)
         if (!isCanvasReady || !initialBoard || hasLoadedInitialBoard.current) return;
-        console.log(initialBoard);
         isStateChanging.current = true;
         fabricCanvas.current.loadFromJSON(initialBoard, () => {
             fabricCanvas.current.renderAll();
@@ -166,7 +156,6 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
             undoStack.current = [serialized];
             setCanUndo(false);
         });
-        console.log("data2");
     }, [isCanvasReady, initialBoard]);
 
 
@@ -190,7 +179,15 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
 
             const emitUpdate = () => {
                 console.log("📤 Sending board update:", { objectCount: json?.objects?.length || 0 });
-                socket.emit("board:update", { roomId, boardData: json });
+                
+                // ✅ FIXED: Changed from .send() to .publish() so updates actually send to Spring Boot
+                getStompClient().publish({
+                    destination: "/app/board",
+                    body: JSON.stringify({
+                        roomId,
+                        boardData: json
+                    })
+                });
             };
 
             if (immediate) {
@@ -202,50 +199,45 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
     };
 
 
-   
-    // Socket.io board updates 
     useEffect(() => {
         if (!fabricCanvas.current) return;
+
+        const client = getStompClient();
 
         const handleBoardUpdate = (boardData) => {
             if (!boardData) return;
 
-            console.log("📥 Received board update:", { objectCount: boardData?.objects?.length || 0 });
+            console.log("📥 Received board update:", {
+                objectCount: boardData?.objects?.length || 0
+            });
 
-            // Prevent processing if it's the same state
             const currentState = JSON.stringify(fabricCanvas.current.toJSON());
             const incomingState = JSON.stringify(boardData);
 
-            if (currentState === incomingState) {
-                console.log("⏭️ Skipping identical state");
-                return;
-            }
+            if (currentState === incomingState) return;
 
             isStateChanging.current = true;
+
             fabricCanvas.current.loadFromJSON(boardData, () => {
                 fabricCanvas.current.renderAll();
                 isStateChanging.current = false;
-
-                // Update undo stack
-                const serialized = JSON.stringify(boardData);
-                if (undoStack.current[undoStack.current.length - 1] !== serialized) {
-                    undoStack.current.push(serialized);
-                    if (undoStack.current.length > 50) undoStack.current.shift();
-                }
             });
         };
 
-        socket.on("board:update", handleBoardUpdate);
+        const subscription = client.subscribe(
+            "/topic/board/" + roomId,
+            (msg) => {
+                const boardData = JSON.parse(msg.body);
+                handleBoardUpdate(boardData);
+            }
+        );
 
         return () => {
-            socket.off("board:update", handleBoardUpdate);
-            if (saveTimeout.current) {
-                clearTimeout(saveTimeout.current);
-            }
+            subscription.unsubscribe();
         };
-    }, []);
 
-   
+    }, [roomId]);
+            
 
     // Sync tool modes
     useEffect(() => {
@@ -526,42 +518,31 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
         { id: Tool.ERASER, icon: Highlighter, label: "Highliter" },
     ];
 
-    useEffect(() => {
-        if (!currentUser || !currentUser.userId) return
-        if (!permittedMember.includes(currentUser.userId)) {
-            setActiveTool(Tool.SELECT);
-        }
-    },[permittedMember, currentUser])
-
     return (
         <div className="flex flex-col md:flex-row h-full p-2">
+            {/* ✅ FIXED: Left Sidebar Tools are now visible to absolutely everyone */}
             <div className="flex md:flex-col gap-2 p-5 bg-slate-900 border-r border-slate-800 z-10 overflow-x-auto no-scrollbar">
-                {
-                    (permittedMember.includes(currentUser.userId) || (currentUser.name) === hostName) &&
-                    tools.map((tool) => (
-                        <button
-                            key={tool.id}
-                            onClick={() => setActiveTool(tool.id)}
-                            className={`rounded-lg transition-all duration-200 flex items-center justify-center gap-2 group relative m-5 ${activeTool === tool.id
-                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40'
-                                : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-100'
-                                }`}
-                            style={{ padding: '12px 10px' }}
-                            title={tool.label}
-                        >
-                            <tool.icon size={20} />
-                            <span className="hidden lg:block text-xs font-medium px-5">
-                                {tool.label}
-                            </span>
-                        </button>
-                    ))
-                }
+                {tools.map((tool) => (
+                    <button
+                        key={tool.id}
+                        onClick={() => setActiveTool(tool.id)}
+                        className={`rounded-lg transition-all duration-200 flex items-center justify-center gap-2 group relative m-5 ${activeTool === tool.id
+                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-100'
+                            }`}
+                        style={{ padding: '12px 10px' }}
+                        title={tool.label}
+                    >
+                        <tool.icon size={20} />
+                        <span className="hidden lg:block text-xs font-medium px-5">
+                            {tool.label}
+                        </span>
+                    </button>
+                ))}
 
                 <div className="h-px bg-slate-800 my-2 hidden md:block px-2" />
-                {
-                (permittedMember.includes(currentUser.userId) || (currentUser.name) === hostName) &&
-                <>
-                     <button
+                
+                <button
                     onClick={undo}
                     disabled={!canUndo}
                     className={`p-3 rounded-lg flex items-center justify-center gap-2 ${canUndo
@@ -584,16 +565,12 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
                 >
                     <Redo2 size={20} />
                 </button>
-                </>
-                }
-               
             </div>
 
             <div className="flex-1 relative bg-slate-950 overflow-hidden cursor-crosshair p-2">
                 <canvas ref={canvasRef} className="p-2" />
 
-{
-    (permittedMember.includes(currentUser.userId) || (currentUser.name) === hostName) &&
+                {/* ✅ FIXED: Top Customization Panel is now visible to absolutely everyone */}
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-4 px-4 py-2 bg-slate-900/90 backdrop-blur-sm border border-slate-800 rounded-2xl shadow-2xl z-20 max-w-[95vw] overflow-x-auto p-4" style={{ padding: '12px 10px' }}>
                     <div className="flex flex-col gap-1 min-w-fit p-2">
                         <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-1">
@@ -687,7 +664,6 @@ const Whiteboard = ({ roomId, initialBoard, permittedMember, currentUser, hostNa
                         </button>
                     </div>
                 </div>
-}
 
                 <div className="absolute bottom-4 left-4 p-3 bg-slate-900/50 rounded-lg text-slate-500 text-[10px] pointer-events-none select-none">
                     Click & Drag to Draw • Double Click Text to Edit • Use Toolbar for Colors

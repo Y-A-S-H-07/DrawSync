@@ -25,15 +25,13 @@ public class JwtFilter extends HttpFilter {
 
         String path = request.getRequestURI();
 
-        // ✅ Allow public endpoints directly
-        if (path.startsWith("/auth") || path.startsWith("/room")) {
+        if (path.startsWith("/auth")) {
             chain.doFilter(request, response);
             return;
         }
 
         String header = request.getHeader("Authorization");
 
-        // ✅ If no token → just continue (DON'T BLOCK)
         if (header == null || !header.startsWith("Bearer ")) {
             chain.doFilter(request, response);
             return;

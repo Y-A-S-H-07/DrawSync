@@ -38,4 +38,15 @@ public class RoomController {
     public String getBoard(@PathVariable String roomId) {
         return roomService.getBoard(roomId);
     }
+
+    @GetMapping("/check/{roomId}")
+    public org.springframework.http.ResponseEntity<?> checkRoomExists(@PathVariable String roomId) {
+        boolean exists = roomRepository.findByRoomId(roomId).isPresent();
+        if (!exists) {
+            return org.springframework.http.ResponseEntity
+                    .status(404)
+                    .body(java.util.Map.of("valid", false, "message", "Invalid Room ID"));
+        }
+        return org.springframework.http.ResponseEntity.ok(java.util.Map.of("valid", true));
+    }
 }

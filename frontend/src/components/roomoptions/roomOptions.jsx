@@ -67,6 +67,7 @@ const styles = {
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
+import api from "../../API/axios";
 
 function RoomOptions() {
   const [roomName, setRoomName] = useState("");
@@ -77,52 +78,41 @@ function RoomOptions() {
 
 
   //CREATE ROOM
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!roomName.trim()) return toast.warning("Enter room name");
 
-    if (!socket.connected) socket.connect(); 
+    try {
+      const { data } = await api.post(`/room/create?roomName=${roomName}`);
 
-    socket.emit("createRoom", { roomName }); 
+      const roomId = data.roomId;  
 
-    //catch event from backend
-    socket.once("roomCreated", ({ roomId }) => {
-      setJoining(true);
-
-      //debounce
-      setTimeout(() => {
-           navigate(`/room/${roomId}`);
-      }, 300);
-    });
-
-    socket.once("error", (msg) => {
-      console.log(msg);
-      alert(msg);
-    });
+      navigate(`/room/${roomId}`);
+    } catch (err) {
+      toast.error("Failed to create room");
+      console.log(err);
+    }
   };
 
-  // JOIN ROOM 
-  const handleJoin = () => {
+  
+  const handleJoin = async () => {
     if (!roomId.trim()) return toast.warning("Enter room ID");
 
-    if (!socket.connected) socket.connect();
-
-    //event emit
-    socket.emit("joinRoom", { roomId });
-
-    //catch event from backend
-    socket.once("roomJoined", ({ roomId,  }) => {
-      setJoining(true);
-
-      setTimeout(() => {
-           navigate(`/room/${roomId}`);
-      }, 300);
-    });
-
-    socket.once("error", (msg) => {
-      toast.error(msg);
-      console.log(msg);
-      // alert(msg);
-    });
+    setJoining(true); // Turn on the loading state while checking
+    try {
+      // 1. Check with the backend first via an HTTP GET request
+      const { data } = await api.get(`/room/check/${roomId.trim()}`);
+      
+      if (data.valid) {
+        // 2. Only redirect if the room actually exists
+        navigate(`/room/${roomId.trim()}`);
+      }
+    } catch (err) {
+      // 3. Keep them right here on this page if it fails
+      toast.error(err.response?.data?.message || "Invalid Room ID! This room does not exist.");
+      console.log(err);
+    } finally {
+      setJoining(false); // Turn off the loading layout indicator
+    }
   };
 
   return (
